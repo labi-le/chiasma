@@ -6,37 +6,48 @@ import (
 	"github.com/labi-le/chiasma/pkg/wallpaper/swww"
 )
 
-func ByNameOrAvailable(tool string) (execute.Provider, error) {
-	if tool == "" {
-		if availableProvider == nil {
-			return nil, execute.ErrUtilityNotFound
-		}
+type providerFactory func() (execute.Provider, error)
 
-		return availableProvider, nil
-	}
-
-	switch tool {
-	case swaybg.Name:
-		return swaybg.NewSwayBG()
-	case swww.Name:
-		return swww.NewSWWW()
-	default:
-		return nil, execute.ErrUtilityNotFound
-	}
-}
-
+// builders maps a backend name to its constructor and probeOrder is the order
+// in which the "" (auto) case probes availability. Both are package vars so
+// availability is probed at call time (never cached at init) and can be
+// stubbed in tests.
 var (
-	availableProvider = getAvailableProvider()
+	builders = map[string]providerFactory{
+		swaybg.Name: func() (execute.Provider, error) { return swaybg.NewSwayBG() },
+		swww.Name:   func() (execute.Provider, error) { return swww.NewSWWW() },
+	}
+	probeOrder = []string{swaybg.Name, swww.Name}
 )
 
-func getAvailableProvider() execute.Provider {
-	if t, err := swaybg.NewSwayBG(); err == nil {
-		return t
+// ByNameOrAvailable returns the Provider interface: this is the backend
+// factory seam, so an interface return is intentional.
+//
+//nolint:ireturn // factory seam: callers select a backend by interface.
+func ByNameOrAvailable(tool string) (execute.Provider, error) {
+	if tool == "" {
+		return getAvailableProvider()
 	}
 
-	if t, err := swww.NewSWWW(); err == nil {
-		return t
+	build, ok := builders[tool]
+	if !ok {
+		return nil, execute.ErrUtilityNotFound
 	}
 
-	return nil
+	p, err := build()
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+//nolint:ireturn // factory helper: returns the selected backend interface.
+func getAvailableProvider() (execute.Provider, error) {
+	for _, name := range probeOrder {
+		if p, err := builders[name](); err == nil {
+			return p, nil
+		}
+	}
+
+	return nil, execute.ErrUtilityNotFound
 }

@@ -1,7 +1,10 @@
 package fs
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,17 +12,28 @@ import (
 	"strings"
 
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/rs/zerolog"
 )
 
+const maxTagLen = 20
+
 var (
-	ErrUnknownExtension = fmt.Errorf("unknown extension")
+	ErrUnknownExtension = errors.New("unknown extension")
 	unsafeChars         = regexp.MustCompile(`[^a-zA-Z0-9а-яА-Я]+`)
 )
 
-func SaveFile(data io.Reader, dir string, tags []string) (string, bool, error) {
+func SaveFile(ctx context.Context, log zerolog.Logger, data io.Reader, dir string, tags []string) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, fmt.Errorf("save file: %w", err)
+	}
+
 	img, err := io.ReadAll(data)
 	if err != nil {
-		return "", false, err
+		return "", false, fmt.Errorf("read image data: %w", err)
+	}
+
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return "", false, fmt.Errorf("save file: %w", ctxErr)
 	}
 
 	ext := mimetype.Detect(img).Extension()
@@ -27,25 +41,65 @@ func SaveFile(data io.Reader, dir string, tags []string) (string, bool, error) {
 		return "", false, ErrUnknownExtension
 	}
 
-	if ioErr := os.MkdirAll(dir, 0755); ioErr != nil {
-		return "", false, ioErr
+	if ioErr := os.MkdirAll(dir, 0750); ioErr != nil {
+		return "", false, fmt.Errorf("create dir %q: %w", dir, ioErr)
 	}
 
-	sha := sha256.New()
-	sha.Write(img)
-	short := fmt.Sprintf("%x", sha.Sum(nil))[:7]
+	sum := sha256.Sum256(img)
+	short := hex.EncodeToString(sum[:])[:7]
 
-	tagSuffix := buildTagSuffix(tags)
+	tagSuffix := buildTagSuffix(log, tags)
 	gen := fmt.Sprintf("%s/sw-%s%s%s", dir, short, tagSuffix, ext)
 
-	if _, err := os.Stat(gen); err == nil {
+	if _, statErr := os.Stat(gen); statErr == nil {
 		return gen, true, nil
 	}
 
-	return gen, false, os.WriteFile(gen, img, 0600)
+	if writeErr := writeFileAtomic(ctx, gen, dir, img); writeErr != nil {
+		return "", false, writeErr
+	}
+
+	return gen, false, nil
 }
 
-func buildTagSuffix(tags []string) string {
+// writeFileAtomic writes data to a temp file in dir and renames it into place,
+// so a crash mid-write never leaves a partial file at the target path.
+func writeFileAtomic(ctx context.Context, path, dir string, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("write file atomic: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(dir, "sw-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName)
+		}
+	}()
+
+	if _, writeErr := tmp.Write(data); writeErr != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp file: %w", writeErr)
+	}
+	if closeErr := tmp.Close(); closeErr != nil {
+		return fmt.Errorf("close temp file: %w", closeErr)
+	}
+	if chmodErr := os.Chmod(tmpName, 0600); chmodErr != nil {
+		return fmt.Errorf("chmod temp file: %w", chmodErr)
+	}
+	if renameErr := os.Rename(tmpName, path); renameErr != nil {
+		return fmt.Errorf("rename temp file: %w", renameErr)
+	}
+
+	tmpName = "" // renamed successfully; skip cleanup
+	return nil
+}
+
+func buildTagSuffix(log zerolog.Logger, tags []string) string {
 	if len(tags) == 0 {
 		return ""
 	}
@@ -57,7 +111,11 @@ func buildTagSuffix(tags []string) string {
 		clean := unsafeChars.ReplaceAllString(t, "")
 		clean = strings.ToLower(clean)
 
-		if clean == "" || len(clean) > 20 {
+		if clean == "" {
+			continue
+		}
+		if len(clean) > maxTagLen {
+			log.Debug().Str("tag", t).Int("limit", maxTagLen).Msg("dropping tag: exceeds length limit")
 			continue
 		}
 

@@ -1,8 +1,12 @@
 package browser
 
+import "slices"
+
+const firefoxBrowser = "firefox"
+
 var (
 	ChromiumBasedBrowsers = []string{"google-chrome", "vivaldi", "chromium", "brave", "opera"}
-	FirefoxBasedBrowsers  = []string{"firefox"}
+	FirefoxBasedBrowsers  = []string{firefoxBrowser}
 )
 
 func AvailableBrowsers() []string {
@@ -10,10 +14,5 @@ func AvailableBrowsers() []string {
 }
 
 func IsChromiumBased(browser string) bool {
-	for _, b := range ChromiumBasedBrowsers {
-		if browser == b {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ChromiumBasedBrowsers, browser)
 }

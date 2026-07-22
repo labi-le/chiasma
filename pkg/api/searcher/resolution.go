@@ -8,6 +8,7 @@ import (
 
 var (
 	ErrInvalidResolution = errors.New("invalid resolution")
+	resolutionRe         = regexp.MustCompile(`\d+x\d+`)
 )
 
 type Resolution struct {
@@ -20,15 +21,21 @@ func (r *Resolution) String() string {
 }
 
 func (r *Resolution) Set(s string) error {
-	if regexp.MustCompile(`\d+x\d+`).MatchString(s) {
-		_, err := fmt.Sscanf(s, "%dx%d", &r.Width, &r.Height)
-		if r.Width <= 0 || r.Height <= 0 {
-			return ErrInvalidResolution
-		}
-		return err
+	if !resolutionRe.MatchString(s) {
+		return ErrInvalidResolution
 	}
 
-	return ErrInvalidResolution
+	var w, h int
+	if _, err := fmt.Sscanf(s, "%dx%d", &w, &h); err != nil {
+		return fmt.Errorf("parse resolution %q: %w", s, err)
+	}
+	if w <= 0 || h <= 0 {
+		return ErrInvalidResolution
+	}
+
+	r.Width = w
+	r.Height = h
+	return nil
 }
 
 func (r *Resolution) Type() string {

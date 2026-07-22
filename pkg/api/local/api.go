@@ -2,8 +2,9 @@ package local
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,7 @@ func NewLocal(log zerolog.Logger, dir string) *Local {
 	}
 }
 
+//nolint:ireturn // seam: the local provider satisfies searcher.Searcher and yields searcher.Image.
 func (l *Local) Search(_ context.Context, q string, _ searcher.Resolution) (searcher.Image, error) {
 	log := l.log.With().Str("op", "Search").Str("query", q).Logger()
 
@@ -35,28 +37,7 @@ func (l *Local) Search(_ context.Context, q string, _ searcher.Resolution) (sear
 		return nil, fmt.Errorf("failed to read directory %s: %w", l.dir, err)
 	}
 
-	queryTerms := strings.Fields(strings.ToLower(q))
-	var candidates []string
-
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-
-		name := strings.ToLower(e.Name())
-		matched := true
-		for _, term := range queryTerms {
-			if !strings.Contains(name, term) {
-				matched = false
-				break
-			}
-		}
-
-		if matched {
-			candidates = append(candidates, filepath.Join(l.dir, e.Name()))
-		}
-	}
-
+	candidates := l.matchingFiles(entries, q)
 	if len(candidates) == 0 {
 		return nil, fmt.Errorf("no local images found for query: %s", q)
 	}
@@ -65,26 +46,59 @@ func (l *Local) Search(_ context.Context, q string, _ searcher.Resolution) (sear
 		candidates[i], candidates[j] = candidates[j], candidates[i]
 	})
 
-	for _, path := range candidates {
-		if err := l.validateImage(path); err == nil {
-			f, err := os.Open(path)
-			if err != nil {
-				log.Warn().Err(err).Str("path", path).Msg("failed to open candidate")
-				continue
-			}
+	return l.openFirstValid(log, candidates)
+}
 
-			img, err := searcher.DetectSize(f)
-			if err != nil {
-				_ = f.Close()
-				log.Warn().Err(err).Str("path", path).Msg("failed to detect image size")
-				continue
-			}
+func (l *Local) matchingFiles(entries []os.DirEntry, q string) []string {
+	queryTerms := strings.Fields(strings.ToLower(q))
+	candidates := make([]string, 0, len(entries))
 
-			return img, nil
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+
+		name := strings.ToLower(e.Name())
+		if matchesAllTerms(name, queryTerms) {
+			candidates = append(candidates, filepath.Join(l.dir, e.Name()))
 		}
 	}
+	return candidates
+}
 
-	return nil, fmt.Errorf("no valid images found among candidates")
+func matchesAllTerms(name string, terms []string) bool {
+	for _, term := range terms {
+		if !strings.Contains(name, term) {
+			return false
+		}
+	}
+	return true
+}
+
+//nolint:ireturn // seam: the local provider satisfies searcher.Searcher and yields searcher.Image.
+func (l *Local) openFirstValid(log zerolog.Logger, candidates []string) (searcher.Image, error) {
+	for _, path := range candidates {
+		if err := l.validateImage(path); err != nil {
+			continue
+		}
+
+		f, err := os.Open(path)
+		if err != nil {
+			log.Warn().Err(err).Str("path", path).Msg("failed to open candidate")
+			continue
+		}
+
+		img, err := searcher.DetectSize(f)
+		if err != nil {
+			_ = f.Close()
+			log.Warn().Err(err).Str("path", path).Msg("failed to detect image size")
+			continue
+		}
+
+		return img, nil
+	}
+
+	return nil, errors.New("no valid images found among candidates")
 }
 
 func (l *Local) validateImage(path string) error {
@@ -96,10 +110,10 @@ func (l *Local) validateImage(path string) error {
 
 	mtype, err := mimetype.DetectFile(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("detect mime type: %w", err)
 	}
 	if !strings.HasPrefix(mtype.String(), "image/") {
-		return fmt.Errorf("not an image")
+		return errors.New("not an image")
 	}
 	return nil
 }

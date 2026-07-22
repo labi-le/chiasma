@@ -18,17 +18,19 @@ type Monitor struct {
 	CurrentResolution Resolution
 }
 
+// MonitorDetector reports the connected screens. It defaults to xrandr.GetScreens
+// in production; tests inject a fake to exercise monitor detection.
+type MonitorDetector func() (xrandr.Screens, error)
+
+func NewByIDXrandr(id string) (Monitor, error) {
+	return newByIDXrandr(xrandr.GetScreens, id)
+}
+
 func (m *Monitor) String() string {
 	return m.ID
 }
 
 func (m *Monitor) Set(s string) error {
-	_, err := exec.LookPath("xrandr")
-	if err != nil {
-		m.ID = s
-		return nil
-
-	}
 	mon, err := NewByIDXrandr(s)
 	if err != nil {
 		return err
@@ -42,9 +44,9 @@ func (m *Monitor) Type() string {
 	return "monitor"
 }
 
-func NewByIDXrandr(id string) (Monitor, error) {
+func newByIDXrandr(detect MonitorDetector, id string) (Monitor, error) {
 	var mon Monitor
-	screens, err := xrandr.GetScreens()
+	screens, err := detect()
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return mon, ErrAutoResolutionNotSupported

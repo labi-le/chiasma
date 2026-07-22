@@ -3,15 +3,11 @@ package searcher
 import (
 	"bytes"
 	"context"
-	"errors"
+	"fmt"
 	"image"
-	_ "image/jpeg"
-	_ "image/png"
+	_ "image/jpeg" // register the JPEG decoder for image.DecodeConfig
+	_ "image/png"  // register the PNG decoder for image.DecodeConfig
 	"io"
-)
-
-var (
-	ErrUnknownSearcher = errors.New("unknown searcher")
 )
 
 type Image interface {
@@ -30,15 +26,24 @@ type detectedImage struct {
 }
 
 func (d *detectedImage) Size() (int, int) { return d.w, d.h }
-func (d *detectedImage) Close() error     { return d.closer.Close() }
+func (d *detectedImage) Close() error {
+	if err := d.closer.Close(); err != nil {
+		return fmt.Errorf("close image: %w", err)
+	}
+	return nil
+}
 
+// DetectSize decodes the image header to report its real dimensions while
+// preserving the full byte stream for the returned reader.
+//
+//nolint:ireturn // seam: callers consume the searcher.Image abstraction, not a concrete type.
 func DetectSize(img io.Reader) (Image, error) {
 	var header bytes.Buffer
 	tee := io.TeeReader(img, &header)
 
 	config, _, err := image.DecodeConfig(tee)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode image config: %w", err)
 	}
 
 	var closer io.Closer
