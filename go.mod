@@ -6,7 +6,7 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/pflag v1.0.10
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.11.1
 	github.com/vcraescu/go-xrandr v0.0.0-20250120044713-67143ce1bea9
 	modernc.org/sqlite v1.54.0
 )
