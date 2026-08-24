@@ -8,7 +8,7 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.12.1
 	github.com/vcraescu/go-xrandr v0.0.0-20250120044713-67143ce1bea9
-	modernc.org/sqlite v1.56.0
+	modernc.org/sqlite v1.57.0
 )
 
 require (
