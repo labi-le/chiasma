@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/gabriel-vasile/mimetype v1.4.16
 	github.com/rs/zerolog v1.35.1
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	github.com/stretchr/testify v1.12.1
 	github.com/vcraescu/go-xrandr v0.0.0-20250120044713-67143ce1bea9
 	modernc.org/sqlite v1.61.0
